@@ -267,19 +267,19 @@ class TimeZoneFinder {
 
   static double _haversineKm(
       double lat1, double lon1, double lat2, double lon2) {
-    const R = 6371.0; // Earth radius km
-    var dLat = _deg2rad(lat2 - lat1);
-    var dLon = _deg2rad(_normLonDelta(lon2 - lon1)); // <-- normalize across IDL
-    var a = math.sin(dLat / 2) * math.sin(dLat / 2) +
+    const R = 6371.0; // km
+    final dLat = _deg2rad(lat2 - lat1);
+    final dLon = _deg2rad(_normLonDelta(lon2 - lon1)); // normalize across IDL
+    final a = math.sin(dLat / 2) * math.sin(dLat / 2) +
         math.cos(_deg2rad(lat1)) *
             math.cos(_deg2rad(lat2)) *
             math.sin(dLon / 2) *
             math.sin(dLon / 2);
-    var c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a));
+    final c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a));
     return R * c;
   }
 
-// Keep dLon in [-180, 180] to avoid 350° vs -10° issues at the anti-meridian
+// Keep Δlon in [-180, 180] so distances near ±180° use the short arc
   static double _normLonDelta(double dLon) {
     while (dLon > 180) dLon -= 360;
     while (dLon < -180) dLon += 360;
@@ -372,8 +372,8 @@ class TimeZoneFinder {
 
   /// Ray-casting point-in-polygon on a single (outer) ring.
   static bool _pointInPolygon(double lat, double lon, List<GeoPoint> ring) {
-    bool inside = false;
-    for (int i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    var inside = false;
+    for (var i = 0, j = ring.length - 1; i < ring.length; j = i++) {
       final xi = ring[i].longitude, yi = ring[i].latitude;
       final xj = ring[j].longitude, yj = ring[j].latitude;
 
@@ -386,14 +386,13 @@ class TimeZoneFinder {
     return inside;
   }
 
-  /// Extract outer rings from a GeoJSON Polygon or MultiPolygon `coordinates`.
   /// Extract outer rings from either:
-  /// - full GeoJSON geometry { "type": "...", "coordinates": [...] }, or
-  /// - a bare coordinates array (Polygon or MultiPolygon).
+  ///  - a full GeoJSON geometry { "type": "...", "coordinates": [...] }, or
+  ///  - a bare coordinates array (Polygon or MultiPolygon).
   ///
-  /// Returns a list of rings; each ring = List<[lon, lat]> (as doubles).
+  /// Returns a list of rings; each ring is List<[lon, lat]> (as doubles).
   static List<List<List<double>>> _outerRings(dynamic geom) {
-    // Unwrap full GeoJSON geometry object if present
+    // If a full geometry object, unwrap it
     String? type;
     dynamic coords = geom;
     if (geom is Map &&
@@ -403,7 +402,6 @@ class TimeZoneFinder {
       coords = geom['coordinates'];
     }
 
-    // Heuristics to detect Polygon/MultiPolygon even when "type" not provided
     bool _looksLikePolygon(dynamic v) =>
         v is List &&
         v.isNotEmpty &&
@@ -417,9 +415,6 @@ class TimeZoneFinder {
         v.first is List &&
         _looksLikePolygon(v.first);
 
-    final rings = <List<List<double>>>[];
-
-    // Normalize numeric conversion
     List<List<double>> _toRing(dynamic rawRing) {
       final out = <List<double>>[];
       if (rawRing is List) {
@@ -431,38 +426,36 @@ class TimeZoneFinder {
           }
         }
       }
-      // Ensure at least 3 points
       if (out.length >= 3) {
-        // Ensure closed ring if needed
         final first = out.first, last = out.last;
         if (first[0] != last[0] || first[1] != last[1]) {
-          out.add([first[0], first[1]]);
+          out.add([first[0], first[1]]); // close ring
         }
         return out;
       }
       return <List<double>>[];
     }
 
-    // Case 1: explicit type
+    final rings = <List<List<double>>>[];
+
     if (type != null) {
       if (type == 'Polygon' && coords is List) {
-        final outer = _toRing((coords).isNotEmpty ? coords[0] : const []);
+        final outer =
+            _toRing((coords as List).isNotEmpty ? coords[0] : const []);
         if (outer.isNotEmpty) rings.add(outer);
         return rings;
       }
       if (type == 'MultiPolygon' && coords is List) {
-        for (final poly in coords) {
+        for (final poly in coords as List) {
           final outer =
               _toRing((poly is List && poly.isNotEmpty) ? poly[0] : const []);
           if (outer.isNotEmpty) rings.add(outer);
         }
         return rings;
       }
-      // Unhandled types (e.g., GeometryCollection) → return empty
-      return rings;
+      return rings; // unknown type
     }
 
-    // Case 2: no type → infer
     if (_looksLikePolygon(coords)) {
       final outer = _toRing((coords as List).first);
       if (outer.isNotEmpty) rings.add(outer);
@@ -477,7 +470,6 @@ class TimeZoneFinder {
       }
       return rings;
     }
-
     return rings;
   }
 }
